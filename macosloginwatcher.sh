@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.22"
+VERSION="1.0.23"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -144,11 +144,27 @@ setup_autostart() {
     <string>$CONFIG_DIR/error.log</string>
     <key>StandardOutPath</key>
     <string>$CONFIG_DIR/output.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+    </dict>
+    <key>WorkingDirectory</key>
+    <string>$CONFIG_DIR</string>
 </dict>
 </plist>
 EOF
 
+    # Unload if already loaded
+    launchctl unload "$LAUNCH_AGENT_FILE" 2>/dev/null || true
+    
+    # Load the new configuration
     launchctl load "$LAUNCH_AGENT_FILE"
+    
+    # Start the service
+    launchctl start com.macosloginwatcher
+    
+    log_message "LaunchAgent setup completed and started" "$CONFIG_DIR/output.log"
 }
 
 # Function to remove autostart
