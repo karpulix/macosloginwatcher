@@ -5,13 +5,13 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.1"
+VERSION="1.0.2"
 
-CONFIG_DIR="$HOME/.config/osxloginwatcher"
+CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
 LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
-LAUNCH_AGENT_FILE="$LAUNCH_AGENT_DIR/com.osxloginwatcher.plist"
-PROCESS_IDENTIFIER="osxloginwatcher_$(openssl rand -hex 8)"
+LAUNCH_AGENT_FILE="$LAUNCH_AGENT_DIR/com.macosloginwatcher.plist"
+PROCESS_IDENTIFIER="macosloginwatcher_$(openssl rand -hex 8)"
 
 # Function to create config directory if it doesn't exist
 create_config_dir() {
@@ -39,7 +39,7 @@ setup_autostart() {
     mkdir -p "$LAUNCH_AGENT_DIR"
     
     # Try to find the script in PATH first (for Homebrew installation)
-    SCRIPT_PATH=$(which osxloginwatcher 2>/dev/null)
+    SCRIPT_PATH=$(which macosloginwatcher 2>/dev/null)
     
     # If not found in PATH, use the current script path
     if [ -z "$SCRIPT_PATH" ]; then
@@ -52,7 +52,7 @@ setup_autostart() {
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.osxloginwatcher</string>
+    <string>com.macosloginwatcher</string>
     <key>ProgramArguments</key>
     <array>
         <string>$SCRIPT_PATH</string>
@@ -116,13 +116,13 @@ validate_config() {
 
 # Add this check before other if statements
 if [ "$1" = "--version" ]; then
-    echo "osxloginwatcher version $VERSION"
+    echo "macosloginwatcher version $VERSION"
     exit 0
 fi
 
 # Setup wizard
 if [ "$1" = "--setup" ]; then
-    echo "Welcome to OSXLoginWatcher Setup Wizard"
+    echo "Welcome to macosloginwatcher Setup Wizard"
     echo "----------------------------------------"
     
     # Check if config exists
@@ -188,9 +188,9 @@ fi
 
 if [ "$1" = "--disable" ]; then
     # First show and kill running processes
-    echo "Found running osxloginwatcher processes:"
+    echo "Found running macosloginwatcher processes:"
     ps aux | grep "[o]sxloginwatcher" || echo "No running processes found"
-    pkill -f "osxloginwatcher" || true
+    pkill -f "macosloginwatcher" || true
     
     # Then remove autostart
     remove_autostart
@@ -201,7 +201,7 @@ fi
 
 # Main script logic
 if ! load_config; then
-    echo "Configuration not found. Please run 'osxloginwatcher --setup' first."
+    echo "Configuration not found. Please run 'macosloginwatcher --setup' first."
     exit 1
 fi
 
@@ -212,7 +212,7 @@ fi
 
 # Save PID when running with process-id
 if [[ "$2" == "--process-id="* ]]; then
-    echo "OSXLoginWatcher started with PID: $$"
+    echo "macosloginwatcher started with PID: $$"
 fi
 
 skip_first=true

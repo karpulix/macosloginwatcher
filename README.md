@@ -1,4 +1,4 @@
-# OSXLoginWatcher
+# MacOSLoginWatcher
 
 A macOS utility that monitors system login events and sends notifications to Telegram when your Mac is unlocked.
 
@@ -16,17 +16,17 @@ A macOS utility that monitors system login events and sends notifications to Tel
 
 1. Download the script:
 ```bash
-curl -O https://raw.githubusercontent.com/karpulix/osxloginwatcher/main/osxloginwatcher.sh
+curl -O https://raw.githubusercontent.com/karpulix/macosloginwatcher/main/macosloginwatcher.sh
 ```
 
 2. Make it executable:
 ```bash
-chmod +x osxloginwatcher.sh
+chmod +x macosloginwatcher.sh
 ```
 
 3. Move it to a directory in your PATH (optional):
 ```bash
-sudo mv osxloginwatcher.sh /usr/local/bin/osxloginwatcher
+sudo mv macosloginwatcher.sh /usr/local/bin/macosloginwatcher
 ```
 
 ### Option 2: Homebrew Installation
@@ -38,7 +38,7 @@ brew tap karpulix/homebrew-tools
 
 2. Install the formula:
 ```bash
-brew install karpulix/homebrew-tools/osxloginwatcher
+brew install karpulix/homebrew-tools/macosloginwatcher
 ```
 
 ## Setup
@@ -56,7 +56,7 @@ brew install karpulix/homebrew-tools/osxloginwatcher
 
 3. Run the setup wizard:
 ```bash
-osxloginwatcher --setup
+macosloginwatcher --setup
 ```
 
 4. Follow the prompts to:
@@ -72,7 +72,7 @@ osxloginwatcher --setup
 The script will automatically start monitoring after setup if you chose to start it immediately. Otherwise, you can start it manually:
 
 ```bash
-osxloginwatcher
+macosloginwatcher
 ```
 
 ### Disable Monitoring
@@ -80,7 +80,7 @@ osxloginwatcher
 To stop monitoring and disable autostart:
 
 ```bash
-osxloginwatcher --disable
+macosloginwatcher --disable
 ```
 
 ### Reconfigure
@@ -88,7 +88,7 @@ osxloginwatcher --disable
 To change your Telegram settings or autostart preferences:
 
 ```bash
-osxloginwatcher --setup
+macosloginwatcher --setup
 ```
 
 ## How It Works
@@ -135,7 +135,7 @@ osxloginwatcher --setup
 
 ## Security
 
-- Your Telegram Bot Token and Chat ID are stored in `~/.config/osxloginwatcher/config`
+- Your Telegram Bot Token and Chat ID are stored in `~/.config/macosloginwatcher/config`
 - The script requires sudo privileges only for log monitoring
 - No data is sent to any servers other than Telegram
 
