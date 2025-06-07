@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.19"
+VERSION="1.0.20"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -196,6 +196,17 @@ validate_config() {
     return 0
 }
 
+# Function to check if process is already running
+check_running_process() {
+    local process_id="$1"
+    local count=$(ps aux | grep -v grep | grep -c "$process_id")
+    if [ "$count" -gt 1 ]; then
+        log_message "Another instance is already running with process ID: $process_id" "$CONFIG_DIR/error.log"
+        return 1
+    fi
+    return 0
+}
+
 # Add this check before other if statements
 if [ "$1" = "--version" ]; then
     echo "macosloginwatcher version $VERSION"
@@ -287,68 +298,83 @@ if [ "$1" = "--disable" ]; then
     exit 0
 fi
 
-# Main script logic
-if ! load_config; then
-    echo "Configuration not found. Please run 'macosloginwatcher --setup' first."
-    exit 1
-fi
-
-# Check and rotate logs before starting
-check_and_rotate_logs
-
-# Check admin privileges before starting
-check_admin_privileges
-
-# Send startup notification
-timestamp=$(date "+%Y-%m-%d %H:%M:%S.%N %z" | sed 's/\([0-9]\{6\}\)[0-9]*/\1/' | sed 's/+//')
-user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
-startup_message="🚀 MacOSLoginWatcher started by $user at $timestamp"
-
-# Print to console
-# echo "[$timestamp] $startup_message"
-
-# Send to Telegram
-curl -s -m 10 -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-    -d "chat_id=$CHAT_ID" \
-    -d "text=$startup_message" \
-    -d "disable_notification=false" \
-    -d "parse_mode=Markdown" > /dev/null || {
-        echo "Error: Failed to send Telegram startup message"
-    }
-
-# Save PID when running with process-id
-if [[ "$2" == "--process-id="* ]]; then
-    echo "macosloginwatcher started with PID: $$"
-fi
-
-skip_first=true
-
-# Use log stream with admin privileges
-log stream --style syslog --predicate 'eventMessage CONTAINS "CA sending unlock success to dispatch"' | while read -r line; do
-    if $skip_first; then
-        skip_first=false
-        continue
+# Main script execution
+if [ "$1" = "--process-id" ]; then
+    PROCESS_ID="$2"
+    
+    # Check if another instance is already running
+    if ! check_running_process "$PROCESS_ID"; then
+        exit 1
     fi
-
-    if [[ "$line" != *"com.apple.loginwindow.logging:Standard"* ]]; then
-        continue
+    
+    # Load configuration
+    if ! load_config; then
+        log_message "Error: Configuration not found. Please run 'macosloginwatcher --setup' first" "$CONFIG_DIR/error.log"
+        exit 1
     fi
-
-    # Extract date (1st and 2nd fields)
-    timestamp=$(echo "$line" | awk '{print $1, $2}')
+    
+    # Validate configuration
+    if ! validate_config; then
+        log_message "Error: Invalid configuration" "$CONFIG_DIR/error.log"
+        exit 1
+    fi
+    
+    # Check admin privileges
+    if ! check_admin_privileges "$@"; then
+        log_message "Error: Failed to obtain administrator privileges" "$CONFIG_DIR/error.log"
+        exit 1
+    fi
+    
+    # Create config directory if it doesn't exist
+    create_config_dir
+    
+    # Check and rotate logs
+    check_and_rotate_logs
+    
+    # Send startup notification
+    timestamp=$(date "+%Y-%m-%d %H:%M:%S.%N %z" | sed 's/\([0-9]\{6\}\)[0-9]*/\1/' | sed 's/+//')
     user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
-    message="🔓 Mac unlocked by $user at $timestamp"
-
-    if [ "$1" != "--setup" ]; then
-        echo "[$timestamp] $message"
-    fi
-
-    # Добавляем обработку ошибок для curl
-    curl -s -m 10 -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+    startup_message="🚀 MacOSLoginWatcher started by $user at $timestamp"
+    
+    # Print to console
+    # echo "[$timestamp] $startup_message"
+    
+    # Send to Telegram
+    curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
         -d "chat_id=$CHAT_ID" \
-        -d "text=$message" \
-        -d "disable_notification=false" \
-        -d "parse_mode=Markdown" > /dev/null || {
-            echo "Error: Failed to send Telegram message"
-        }
-done
+        -d "text=$startup_message" \
+        -d "parse_mode=HTML" > /dev/null
+    
+    # Start monitoring
+    while true; do
+        # Get current user
+        current_user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
+        
+        # If user is logged in
+        if [ ! -z "$current_user" ]; then
+            # Get login time
+            login_time=$(last "$current_user" | head -n 1 | awk '{print $4, $5, $6, $7}')
+            
+            # Get IP address
+            ip_address=$(curl -s https://api.ipify.org)
+            
+            # Get location
+            location=$(curl -s "https://ipapi.co/$ip_address/json/" | jq -r '.city + ", " + .country_name')
+            
+            # Format message
+            message="🔔 <b>New Login Detected</b>\n\n👤 User: $current_user\n⏰ Time: $login_time\n🌐 IP: $ip_address\n📍 Location: $location"
+            
+            # Send to Telegram
+            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+                -d "chat_id=$CHAT_ID" \
+                -d "text=$message" \
+                -d "parse_mode=HTML" > /dev/null
+            
+            # Wait for 5 minutes before checking again
+            sleep 300
+        else
+            # Wait for 1 minute before checking again
+            sleep 60
+        fi
+    done
+fi
