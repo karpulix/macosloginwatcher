@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.26"
+VERSION="1.0.27"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -215,9 +215,11 @@ validate_config() {
 # Function to check if process is already running
 check_running_process() {
     local process_id="$1"
-    # Проверяем только процессы с точно таким же ID
-    local count=$(ps aux | grep -v grep | grep -c "$process_id$")
-    if [ "$count" -gt 1 ]; then
+    # Получаем PID текущего процесса
+    local current_pid=$$
+    # Проверяем только процессы с точно таким же ID, исключая текущий процесс
+    local count=$(ps aux | grep -v grep | grep -v "$current_pid" | grep -c "$process_id$")
+    if [ "$count" -gt 0 ]; then
         log_message "Another instance is already running with process ID: $process_id" "$CONFIG_DIR/error.log"
         return 1
     fi
