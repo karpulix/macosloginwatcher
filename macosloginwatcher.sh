@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.21"
+VERSION="1.0.22"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -287,7 +287,7 @@ fi
 if [ "$1" = "--disable" ]; then
     # First show and kill running processes
     echo "Found running macosloginwatcher processes:"
-    ps aux | grep "macosloginwatcher" | grep -v grep || echo "No running processes found"
+    ps aux | grep macosloginwatcher | grep -v grep || echo "No running processes found"
     pkill -f "macosloginwatcher" || true
     
     # Then remove autostart and privileges file
@@ -301,6 +301,7 @@ fi
 # Main script execution
 if [ "$1" = "--process-id" ]; then
     PROCESS_ID="$2"
+    log_message "Starting macosloginwatcher with process ID: $PROCESS_ID" "$CONFIG_DIR/output.log"
     
     # Check if another instance is already running
     if ! check_running_process "$PROCESS_ID"; then
