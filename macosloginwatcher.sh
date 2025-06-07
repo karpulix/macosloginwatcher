@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.16"
+VERSION="1.0.17"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -13,6 +13,38 @@ LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
 LAUNCH_AGENT_FILE="$LAUNCH_AGENT_DIR/com.macosloginwatcher.plist"
 PROCESS_IDENTIFIER="macosloginwatcher_$(openssl rand -hex 8)"
 PRIVILEGES_FILE="$CONFIG_DIR/.privileges_granted"
+MAX_LOG_SIZE=$((5 * 1024 * 1024))  # 5MB in bytes
+MAX_LOG_FILES=5  # Keep 5 rotated log files
+
+# Function to rotate logs
+rotate_logs() {
+    local log_file="$1"
+    local max_size="$2"
+    local max_files="$3"
+    
+    # Check if log file exists and is larger than max size
+    if [ -f "$log_file" ] && [ $(stat -f%z "$log_file") -gt "$max_size" ]; then
+        # Rotate existing log files
+        for ((i=max_files-1; i>=0; i--)); do
+            if [ $i -eq 0 ]; then
+                # Move current log to .1
+                mv "$log_file" "${log_file}.1" 2>/dev/null || true
+            else
+                # Move older logs
+                mv "${log_file}.$i" "${log_file}.$((i+1))" 2>/dev/null || true
+            fi
+        done
+        
+        # Create new empty log file
+        touch "$log_file"
+    fi
+}
+
+# Function to check and rotate logs
+check_and_rotate_logs() {
+    rotate_logs "$CONFIG_DIR/error.log" "$MAX_LOG_SIZE" "$MAX_LOG_FILES"
+    rotate_logs "$CONFIG_DIR/output.log" "$MAX_LOG_SIZE" "$MAX_LOG_FILES"
+}
 
 # Function to request admin privileges using osascript
 request_admin_privileges() {
@@ -219,10 +251,8 @@ if [ "$1" = "--setup" ]; then
     if [[ "$AUTOSTART" =~ ^[Yy][Ee][Ss]$ ]]; then
         setup_autostart
         echo "Autostart has been enabled!"
-        
-        # Запускаем процесс напрямую вместо launchctl
-        "$0" "--process-id=$PROCESS_IDENTIFIER" &
-        echo "Process has been started with PID: $!"
+        echo "Starting the process..."
+        launchctl start com.macosloginwatcher
     fi
     
     exit 0
@@ -248,13 +278,11 @@ if ! load_config; then
     exit 1
 fi
 
+# Check and rotate logs before starting
+check_and_rotate_logs
+
 # Check admin privileges before starting
 check_admin_privileges
-
-# Add process identifier to the command line
-if [[ "$*" != *"--process-id="* ]]; then
-    exec "$0" "$@" "--process-id=$PROCESS_IDENTIFIER"
-fi
 
 # Save PID when running with process-id
 if [[ "$2" == "--process-id="* ]]; then
