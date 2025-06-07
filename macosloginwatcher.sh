@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.23"
+VERSION="1.0.24"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -315,8 +315,13 @@ if [ "$1" = "--disable" ]; then
 fi
 
 # Main script execution
-if [ "$1" = "--process-id" ]; then
-    PROCESS_ID="$2"
+if [[ "$1" == --process-id* ]]; then
+    # Получаем идентификатор процесса (после =) или из следующего аргумента
+    if [[ "$1" == *=* ]]; then
+        PROCESS_ID="${1#*=}"
+    else
+        PROCESS_ID="$2"
+    fi
     log_message "Starting macosloginwatcher with process ID: $PROCESS_ID" "$CONFIG_DIR/output.log"
     
     # Check if another instance is already running
