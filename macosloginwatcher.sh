@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.27"
+VERSION="1.0.28"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -13,6 +13,7 @@ LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
 LAUNCH_AGENT_FILE="$LAUNCH_AGENT_DIR/com.macosloginwatcher.plist"
 PROCESS_IDENTIFIER="macosloginwatcher_$(openssl rand -hex 8)"
 PRIVILEGES_FILE="$CONFIG_DIR/.privileges_granted"
+PID_FILE="$CONFIG_DIR/.pid"
 MAX_LOG_SIZE=$((5 * 1024 * 1024))  # 5MB in bytes
 MAX_LOG_FILES=5  # Keep 5 rotated log files
 
@@ -124,6 +125,9 @@ setup_autostart() {
         SCRIPT_PATH=$(realpath "$0")
     fi
     
+    # Generate new process ID
+    PROCESS_IDENTIFIER="macosloginwatcher_$(openssl rand -hex 8)"
+    
     cat > "$LAUNCH_AGENT_FILE" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -139,7 +143,7 @@ setup_autostart() {
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <false/>
     <key>StandardErrorPath</key>
     <string>$CONFIG_DIR/error.log</string>
     <key>StandardOutPath</key>
@@ -161,7 +165,7 @@ EOF
     # Load the new configuration
     launchctl load "$LAUNCH_AGENT_FILE"
     
-    # Start the service
+    # Start the process immediately
     launchctl start com.macosloginwatcher
     
     log_message "LaunchAgent setup completed and started" "$CONFIG_DIR/output.log"
@@ -215,16 +219,26 @@ validate_config() {
 # Function to check if process is already running
 check_running_process() {
     local process_id="$1"
-    # Получаем PID текущего процесса
-    local current_pid=$$
-    # Проверяем только процессы с точно таким же ID, исключая текущий процесс
-    local count=$(ps aux | grep -v grep | grep -v "$current_pid" | grep -c "$process_id$")
-    if [ "$count" -gt 0 ]; then
+    # Проверяем, есть ли другой процесс с таким же ID
+    if pgrep -f "$process_id" | grep -v "$$" > /dev/null; then
         log_message "Another instance is already running with process ID: $process_id" "$CONFIG_DIR/error.log"
         return 1
     fi
     return 0
 }
+
+# Function to cleanup on exit
+cleanup() {
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE" 2>/dev/null)
+        if [ "$pid" = "$$" ]; then
+            rm -f "$PID_FILE"
+        fi
+    fi
+}
+
+# Register cleanup function
+trap cleanup EXIT
 
 # Add this check before other if statements
 if [ "$1" = "--version" ]; then
@@ -295,9 +309,7 @@ if [ "$1" = "--setup" ]; then
     read -p "Do you want to enable autostart on system login? (yes/no): " AUTOSTART
     if [[ "$AUTOSTART" =~ ^[Yy][Ee][Ss]$ ]]; then
         setup_autostart
-        echo "Autostart has been enabled!"
-        echo "Starting the process..."
-        launchctl start com.macosloginwatcher
+        echo "Autostart has been enabled and process started!"
     fi
     
     exit 0
