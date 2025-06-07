@@ -1,3 +1,4 @@
 .trash/
 .DS_Store
 macosloginwatcher.rb
+macosloginwatcher-*.tar.gz

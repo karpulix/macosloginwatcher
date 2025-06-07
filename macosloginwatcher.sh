@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.20"
+VERSION="1.0.21"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -332,12 +332,9 @@ if [ "$1" = "--process-id" ]; then
     check_and_rotate_logs
     
     # Send startup notification
-    timestamp=$(date "+%Y-%m-%d %H:%M:%S.%N %z" | sed 's/\([0-9]\{6\}\)[0-9]*/\1/' | sed 's/+//')
+    timestamp=$(get_timestamp)
     user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
     startup_message="🚀 MacOSLoginWatcher started by $user at $timestamp"
-    
-    # Print to console
-    # echo "[$timestamp] $startup_message"
     
     # Send to Telegram
     curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
@@ -345,36 +342,21 @@ if [ "$1" = "--process-id" ]; then
         -d "text=$startup_message" \
         -d "parse_mode=HTML" > /dev/null
     
-    # Start monitoring
-    while true; do
-        # Get current user
-        current_user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
-        
-        # If user is logged in
-        if [ ! -z "$current_user" ]; then
-            # Get login time
-            login_time=$(last "$current_user" | head -n 1 | awk '{print $4, $5, $6, $7}')
-            
-            # Get IP address
-            ip_address=$(curl -s https://api.ipify.org)
-            
-            # Get location
-            location=$(curl -s "https://ipapi.co/$ip_address/json/" | jq -r '.city + ", " + .country_name')
-            
-            # Format message
-            message="🔔 <b>New Login Detected</b>\n\n👤 User: $current_user\n⏰ Time: $login_time\n🌐 IP: $ip_address\n📍 Location: $location"
-            
-            # Send to Telegram
-            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-                -d "chat_id=$CHAT_ID" \
-                -d "text=$message" \
-                -d "parse_mode=HTML" > /dev/null
-            
-            # Wait for 5 minutes before checking again
-            sleep 300
-        else
-            # Wait for 1 minute before checking again
-            sleep 60
+    # Start monitoring login events
+    log stream --style syslog --predicate 'eventMessage CONTAINS "CA sending unlock success to dispatch"' | while read -r line; do
+        if [[ "$line" != *"com.apple.loginwindow.logging:Standard"* ]]; then
+            continue
         fi
+
+        # Extract date (1st and 2nd fields)
+        timestamp=$(get_timestamp)
+        user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
+        message="🔓 Mac unlocked by $user at $timestamp"
+
+        # Send to Telegram
+        curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+            -d "chat_id=$CHAT_ID" \
+            -d "text=$message" \
+            -d "parse_mode=HTML" > /dev/null
     done
 fi
