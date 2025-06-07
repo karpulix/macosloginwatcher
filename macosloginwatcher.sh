@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.17"
+VERSION="1.0.18"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -261,7 +261,7 @@ fi
 if [ "$1" = "--disable" ]; then
     # First show and kill running processes
     echo "Found running macosloginwatcher processes:"
-    ps aux | grep "[o]sxloginwatcher" || echo "No running processes found"
+    ps aux | grep "macosloginwatcher" | grep -v grep || echo "No running processes found"
     pkill -f "macosloginwatcher" || true
     
     # Then remove autostart and privileges file
@@ -283,6 +283,23 @@ check_and_rotate_logs
 
 # Check admin privileges before starting
 check_admin_privileges
+
+# Send startup notification
+timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
+startup_message="🚀 MacOSLoginWatcher started by $user at $timestamp"
+
+# Print to console
+echo "[$timestamp] $startup_message"
+
+# Send to Telegram
+curl -s -m 10 -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+    -d "chat_id=$CHAT_ID" \
+    -d "text=$startup_message" \
+    -d "disable_notification=false" \
+    -d "parse_mode=Markdown" > /dev/null || {
+        echo "Error: Failed to send Telegram startup message"
+    }
 
 # Save PID when running with process-id
 if [[ "$2" == "--process-id="* ]]; then
