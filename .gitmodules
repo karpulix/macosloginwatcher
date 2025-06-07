@@ -1,0 +1,3 @@
+[submodule "homebrew-tools"]
+	path = homebrew-tools
+	url = git@github.com:karpulix/homebrew-tools.git

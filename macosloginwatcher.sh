@@ -5,13 +5,36 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.2"
+VERSION="1.0.7"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
 LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
 LAUNCH_AGENT_FILE="$LAUNCH_AGENT_DIR/com.macosloginwatcher.plist"
 PROCESS_IDENTIFIER="macosloginwatcher_$(openssl rand -hex 8)"
+PRIVILEGES_FILE="$CONFIG_DIR/.privileges_granted"
+
+# Function to request admin privileges using osascript
+request_admin_privileges() {
+    if [ ! -f "$PRIVILEGES_FILE" ]; then
+        osascript -e 'do shell script "echo \"Requesting admin privileges...\"" with administrator privileges' >/dev/null 2>&1
+        if [ $? -eq 0 ]; then
+            touch "$PRIVILEGES_FILE"
+            return 0
+        fi
+        return 1
+    fi
+    return 0
+}
+
+# Function to check if we have admin privileges
+check_admin_privileges() {
+    if [ ! -f "$PRIVILEGES_FILE" ]; then
+        echo "Error: This script requires administrator privileges"
+        echo "Please run 'macosloginwatcher --setup' first to grant the necessary permissions"
+        exit 1
+    fi
+}
 
 # Function to create config directory if it doesn't exist
 create_config_dir() {
@@ -125,6 +148,13 @@ if [ "$1" = "--setup" ]; then
     echo "Welcome to macosloginwatcher Setup Wizard"
     echo "----------------------------------------"
     
+    # Request admin privileges during setup
+    if ! request_admin_privileges; then
+        echo "Error: Failed to obtain administrator privileges"
+        echo "Please run the script again and grant the requested permissions"
+        exit 1
+    fi
+    
     # Check if config exists
     if [ -f "$CONFIG_FILE" ]; then
         # Load existing config
@@ -192,9 +222,10 @@ if [ "$1" = "--disable" ]; then
     ps aux | grep "[o]sxloginwatcher" || echo "No running processes found"
     pkill -f "macosloginwatcher" || true
     
-    # Then remove autostart
+    # Then remove autostart and privileges file
     remove_autostart
-    echo "Autostart has been disabled and running instances have been stopped!"
+    rm -f "$PRIVILEGES_FILE"
+    echo "Autostart has been disabled, running instances have been stopped, and privileges have been revoked!"
     
     exit 0
 fi
@@ -204,6 +235,9 @@ if ! load_config; then
     echo "Configuration not found. Please run 'macosloginwatcher --setup' first."
     exit 1
 fi
+
+# Check admin privileges before starting
+check_admin_privileges
 
 # Add process identifier to the command line
 if [[ "$*" != *"--process-id="* ]]; then
@@ -217,7 +251,8 @@ fi
 
 skip_first=true
 
-sudo log stream --style syslog --predicate 'eventMessage CONTAINS "CA sending unlock success to dispatch"' | while read -r line; do
+# Use log stream with admin privileges
+log stream --style syslog --predicate 'eventMessage CONTAINS "CA sending unlock success to dispatch"' | while read -r line; do
     if $skip_first; then
         skip_first=false
         continue
@@ -236,19 +271,12 @@ sudo log stream --style syslog --predicate 'eventMessage CONTAINS "CA sending un
         echo "[$timestamp] $message"
     fi
 
-    # Проверяем sudo права перед запуском
-    if ! sudo -n true 2>/dev/null; then
-        echo "Error: This script requires sudo privileges"
-        exit 1
-    fi
-
     # Добавляем обработку ошибок для curl
     curl -s -m 10 -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
         -d "chat_id=$CHAT_ID" \
         -d "text=$message" \
         -d "disable_notification=false" \
         -d "parse_mode=Markdown" > /dev/null || {
-        echo "Failed to send Telegram message"
-        # Можно добавить повторную попытку или другую обработку ошибки
-    }
+            echo "Error: Failed to send Telegram message"
+        }
 done
