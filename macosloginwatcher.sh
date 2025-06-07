@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.18"
+VERSION="1.0.19"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -15,6 +15,18 @@ PROCESS_IDENTIFIER="macosloginwatcher_$(openssl rand -hex 8)"
 PRIVILEGES_FILE="$CONFIG_DIR/.privileges_granted"
 MAX_LOG_SIZE=$((5 * 1024 * 1024))  # 5MB in bytes
 MAX_LOG_FILES=5  # Keep 5 rotated log files
+
+# Function to get formatted timestamp
+get_timestamp() {
+    date "+%Y-%m-%d %H:%M:%S.%N %z" | sed 's/\([0-9]\{6\}\)[0-9]*/\1/' | sed 's/+//'
+}
+
+# Function to log messages with timestamp
+log_message() {
+    local message="$1"
+    local log_file="$2"
+    echo "$(get_timestamp) $message" >> "$log_file"
+}
 
 # Function to rotate logs
 rotate_logs() {
@@ -49,11 +61,14 @@ check_and_rotate_logs() {
 # Function to request admin privileges using osascript
 request_admin_privileges() {
     if [ ! -f "$PRIVILEGES_FILE" ]; then
+        log_message "Requesting admin privileges..." "$CONFIG_DIR/output.log"
         osascript -e 'do shell script "echo \"Requesting admin privileges...\"" with administrator privileges' >/dev/null 2>&1
         if [ $? -eq 0 ]; then
             touch "$PRIVILEGES_FILE"
+            log_message "Admin privileges granted" "$CONFIG_DIR/output.log"
             return 0
         fi
+        log_message "Failed to obtain admin privileges" "$CONFIG_DIR/error.log"
         return 1
     fi
     return 0
@@ -285,12 +300,12 @@ check_and_rotate_logs
 check_admin_privileges
 
 # Send startup notification
-timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+timestamp=$(date "+%Y-%m-%d %H:%M:%S.%N %z" | sed 's/\([0-9]\{6\}\)[0-9]*/\1/' | sed 's/+//')
 user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
 startup_message="🚀 MacOSLoginWatcher started by $user at $timestamp"
 
 # Print to console
-echo "[$timestamp] $startup_message"
+# echo "[$timestamp] $startup_message"
 
 # Send to Telegram
 curl -s -m 10 -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
