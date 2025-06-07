@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.0"
+VERSION="1.0.1"
 
 CONFIG_DIR="$HOME/.config/osxloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
