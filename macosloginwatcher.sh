@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.28"
+VERSION="1.0.29"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -59,20 +59,22 @@ check_and_rotate_logs() {
     rotate_logs "$CONFIG_DIR/output.log" "$MAX_LOG_SIZE" "$MAX_LOG_FILES"
 }
 
-# Function to request admin privileges using osascript
+# Function to request admin privileges
 request_admin_privileges() {
-    if [ ! -f "$PRIVILEGES_FILE" ]; then
-        log_message "Requesting admin privileges..." "$CONFIG_DIR/output.log"
-        osascript -e 'do shell script "echo \"Requesting admin privileges...\"" with administrator privileges' >/dev/null 2>&1
-        if [ $? -eq 0 ]; then
-            touch "$PRIVILEGES_FILE"
-            log_message "Admin privileges granted" "$CONFIG_DIR/output.log"
-            return 0
-        fi
-        log_message "Failed to obtain admin privileges" "$CONFIG_DIR/error.log"
-        return 1
+    # Check if we're already running as root
+    if [ "$(id -u)" = "0" ]; then
+        return 0
     fi
-    return 0
+    
+    # Check if we're running in a terminal
+    if [ -t 1 ]; then
+        # Request admin privileges using osascript
+        osascript -e "do shell script \"$0 $*\" with administrator privileges" >/dev/null 2>&1
+        return $?
+    else
+        # If not in terminal, just return success
+        return 0
+    fi
 }
 
 # Function to check if we have admin privileges
@@ -246,6 +248,26 @@ if [ "$1" = "--version" ]; then
     exit 0
 fi
 
+# Main script logic
+if [ "$1" = "--process-id" ]; then
+    # This is a child process, no need to request admin privileges
+    PROCESS_IDENTIFIER="$2"
+    if [ -z "$PROCESS_IDENTIFIER" ]; then
+        echo "Error: Process ID is required"
+        exit 1
+    fi
+    
+    # Check if another instance is running
+    if pgrep -f "macosloginwatcher.*$PROCESS_IDENTIFIER" | grep -v "$$" > /dev/null; then
+        echo "Another instance is already running"
+        exit 1
+    fi
+    
+    # Start monitoring
+    monitor_login_activity
+    exit 0
+fi
+
 # Setup wizard
 if [ "$1" = "--setup" ]; then
     echo "Welcome to macosloginwatcher Setup Wizard"
@@ -329,71 +351,12 @@ if [ "$1" = "--disable" ]; then
     exit 0
 fi
 
-# Main script execution
-if [[ "$1" == --process-id* ]]; then
-    # Получаем идентификатор процесса (после =) или из следующего аргумента
-    if [[ "$1" == *=* ]]; then
-        PROCESS_ID="${1#*=}"
-    else
-        PROCESS_ID="$2"
-    fi
-    log_message "Starting macosloginwatcher with process ID: $PROCESS_ID" "$CONFIG_DIR/output.log"
+# If no arguments provided, start as a child process
+if [ $# -eq 0 ]; then
+    # Generate a unique process ID
+    PROCESS_IDENTIFIER="macosloginwatcher_$(openssl rand -hex 8)"
     
-    # Check if another instance is already running
-    if ! check_running_process "$PROCESS_ID"; then
-        exit 1
-    fi
-    
-    # Load configuration
-    if ! load_config; then
-        log_message "Error: Configuration not found. Please run 'macosloginwatcher --setup' first" "$CONFIG_DIR/error.log"
-        exit 1
-    fi
-    
-    # Validate configuration
-    if ! validate_config; then
-        log_message "Error: Invalid configuration" "$CONFIG_DIR/error.log"
-        exit 1
-    fi
-    
-    # Check admin privileges
-    if ! check_admin_privileges "$@"; then
-        log_message "Error: Failed to obtain administrator privileges" "$CONFIG_DIR/error.log"
-        exit 1
-    fi
-    
-    # Create config directory if it doesn't exist
-    create_config_dir
-    
-    # Check and rotate logs
-    check_and_rotate_logs
-    
-    # Send startup notification
-    timestamp=$(get_timestamp)
-    user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
-    startup_message="🚀 MacOSLoginWatcher started by $user at $timestamp"
-    
-    # Send to Telegram
-    curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-        -d "chat_id=$CHAT_ID" \
-        -d "text=$startup_message" \
-        -d "parse_mode=HTML" > /dev/null
-    
-    # Start monitoring login events
-    log stream --style syslog --predicate 'eventMessage CONTAINS "CA sending unlock success to dispatch"' | while read -r line; do
-        if [[ "$line" != *"com.apple.loginwindow.logging:Standard"* ]]; then
-            continue
-        fi
-
-        # Extract date (1st and 2nd fields)
-        timestamp=$(get_timestamp)
-        user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
-        message="🔓 Mac unlocked by $user at $timestamp"
-
-        # Send to Telegram
-        curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-            -d "chat_id=$CHAT_ID" \
-            -d "text=$message" \
-            -d "parse_mode=HTML" > /dev/null
-    done
+    # Start a new instance with the process ID
+    "$0" --process-id "$PROCESS_IDENTIFIER" &
+    exit 0
 fi
