@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.14"
+VERSION="1.0.16"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -29,11 +29,19 @@ request_admin_privileges() {
 
 # Function to check if we have admin privileges
 check_admin_privileges() {
+    # If running as a LaunchAgent, we need to request privileges each time
+    if [[ "$*" == *"--process-id="* ]]; then
+        osascript -e 'do shell script "echo \"Requesting admin privileges...\"" with administrator privileges' >/dev/null 2>&1
+        return $?
+    fi
+    
+    # For manual runs, check the privileges file
     if [ ! -f "$PRIVILEGES_FILE" ]; then
         echo "Error: This script requires administrator privileges"
         echo "Please run 'macosloginwatcher --setup' first to grant the necessary permissions"
         exit 1
     fi
+    return 0
 }
 
 # Function to create config directory if it doesn't exist
@@ -85,6 +93,10 @@ setup_autostart() {
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>StandardErrorPath</key>
+    <string>$CONFIG_DIR/error.log</string>
+    <key>StandardOutPath</key>
+    <string>$CONFIG_DIR/output.log</string>
 </dict>
 </plist>
 EOF
