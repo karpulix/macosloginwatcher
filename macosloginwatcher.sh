@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Version
-VERSION="1.1.4"
+VERSION="1.1.5"
 
 # Get script path
 if [[ -L "$0" ]]; then
@@ -300,6 +300,8 @@ main() {
                 read -p "Do you want to change the configuration? (yes/no): " CHANGE_CONFIG
                 if [[ ! "$CHANGE_CONFIG" =~ ^[Yy][Ee][Ss]$ ]]; then
                     echo "Keeping existing configuration."
+                    echo "Use --start to start the service"
+                    echo "Use --stop to stop the service"
                     exit 0
                 fi
             fi
