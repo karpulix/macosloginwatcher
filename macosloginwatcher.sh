@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.31"
+VERSION="1.0.32"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -192,6 +192,10 @@ setup_autostart() {
     <string>Interactive</string>
     <key>ThrottleInterval</key>
     <integer>10</integer>
+    <key>AbandonProcessGroup</key>
+    <true/>
+    <key>ExitTimeOut</key>
+    <integer>10</integer>
 </dict>
 </plist>
 EOF
@@ -201,6 +205,9 @@ EOF
     
     # Unload if already loaded
     launchctl unload "$LAUNCH_AGENT_FILE" 2>/dev/null || true
+    
+    # Wait a bit to ensure the service is unloaded
+    sleep 2
     
     # Load the new configuration
     if ! launchctl load "$LAUNCH_AGENT_FILE"; then
@@ -215,6 +222,21 @@ EOF
     fi
     
     log_message "LaunchAgent setup completed and started" "$CONFIG_DIR/output.log"
+    
+    # Get current user and timestamp for manual startup message
+    user=$(get_current_user) || {
+        log_message "Failed to get current user" "$CONFIG_DIR/error.log"
+        return 1
+    }
+    timestamp=$(get_timestamp)
+    
+    startup_message="🚀 MacOSLoginWatcher started (manual) by $user at $timestamp"
+    # Send to Telegram
+    if ! send_telegram_message "$startup_message"; then
+        log_message "Failed to send startup notification" "$CONFIG_DIR/error.log"
+        return 1
+    fi
+    
     return 0
 }
 
@@ -293,12 +315,19 @@ handle_termination() {
 # Function to check if process is already running
 check_running_process() {
     local process_id="$1"
+    # Check PID file first
     if [ -f "$PID_FILE" ]; then
         local pid=$(cat "$PID_FILE" 2>/dev/null)
         if [ -n "$pid" ] && ps -p "$pid" > /dev/null 2>&1; then
             log_message "Process already running with PID: $pid" "$CONFIG_DIR/error.log"
             return 1
         fi
+    fi
+    
+    # Check for other instances
+    if pgrep -f "macosloginwatcher.*--process-id" | grep -v "$$" > /dev/null; then
+        log_message "Another instance is already running" "$CONFIG_DIR/error.log"
+        return 1
     fi
     return 0
 }
@@ -394,7 +423,7 @@ if [ "$1" = "--process-id" ]; then
         rm -f "$PID_FILE"
         exit 1
     }
-    startup_message="🚀 MacOSLoginWatcher started by $user at $timestamp"
+    startup_message="🚀 MacOSLoginWatcher started (autostart) by $user at $timestamp"
     
     # Send to Telegram
     if ! send_telegram_message "$startup_message"; then
@@ -497,6 +526,16 @@ if [ "$1" = "--setup" ]; then
     # Ask about autostart
     read -p "Do you want to enable autostart on system login? (yes/no): " AUTOSTART
     if [[ "$AUTOSTART" =~ ^[Yy][Ee][Ss]$ ]]; then
+        # Stop any existing instances first
+        if [ -f "$PID_FILE" ]; then
+            local pid=$(cat "$PID_FILE" 2>/dev/null)
+            if [ -n "$pid" ]; then
+                kill "$pid" 2>/dev/null || true
+            fi
+            rm -f "$PID_FILE"
+        fi
+        pkill -f "macosloginwatcher.*--process-id" || true
+        
         if ! setup_autostart; then
             echo "Error: Failed to setup autostart"
             exit 1
@@ -534,6 +573,12 @@ fi
 if [ $# -eq 0 ]; then
     # Generate a unique process ID
     PROCESS_IDENTIFIER="macosloginwatcher_$(openssl rand -hex 8)"
+    
+    # Check if process is already running
+    if ! check_running_process "$PROCESS_IDENTIFIER"; then
+        echo "Another instance is already running"
+        exit 1
+    fi
     
     # Start a new instance with the process ID
     "$0" --process-id "$PROCESS_IDENTIFIER" &
