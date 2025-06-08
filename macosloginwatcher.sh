@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.30"
+VERSION="1.0.31"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -115,6 +115,27 @@ load_config() {
     fi
 }
 
+# Function to validate script path
+validate_script_path() {
+    local script_path="$1"
+    if [ ! -f "$script_path" ] || [ ! -x "$script_path" ]; then
+        log_message "Invalid script path: $script_path" "$CONFIG_DIR/error.log"
+        return 1
+    fi
+    return 0
+}
+
+# Function to escape XML special characters
+escape_xml() {
+    local string="$1"
+    string="${string//&/&amp;}"
+    string="${string//</&lt;}"
+    string="${string//>/&gt;}"
+    string="${string//\"/&quot;}"
+    string="${string//\'/&apos;}"
+    echo "$string"
+}
+
 # Function to setup autostart
 setup_autostart() {
     mkdir -p "$LAUNCH_AGENT_DIR"
@@ -127,8 +148,18 @@ setup_autostart() {
         SCRIPT_PATH=$(realpath "$0")
     fi
     
+    # Validate script path
+    if ! validate_script_path "$SCRIPT_PATH"; then
+        echo "Error: Invalid script path"
+        return 1
+    fi
+    
     # Generate new process ID
     PROCESS_IDENTIFIER="macosloginwatcher_$(openssl rand -hex 8)"
+    
+    # Escape special characters in paths
+    ESCAPED_SCRIPT_PATH=$(escape_xml "$SCRIPT_PATH")
+    ESCAPED_CONFIG_DIR=$(escape_xml "$CONFIG_DIR")
     
     cat > "$LAUNCH_AGENT_FILE" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -139,7 +170,7 @@ setup_autostart() {
     <string>com.macosloginwatcher</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$SCRIPT_PATH</string>
+        <string>$ESCAPED_SCRIPT_PATH</string>
         <string>--process-id=$PROCESS_IDENTIFIER</string>
     </array>
     <key>RunAtLoad</key>
@@ -147,38 +178,65 @@ setup_autostart() {
     <key>KeepAlive</key>
     <false/>
     <key>StandardErrorPath</key>
-    <string>$CONFIG_DIR/error.log</string>
+    <string>$ESCAPED_CONFIG_DIR/error.log</string>
     <key>StandardOutPath</key>
-    <string>$CONFIG_DIR/output.log</string>
+    <string>$ESCAPED_CONFIG_DIR/output.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
     </dict>
     <key>WorkingDirectory</key>
-    <string>$CONFIG_DIR</string>
+    <string>$ESCAPED_CONFIG_DIR</string>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
 </dict>
 </plist>
 EOF
 
+    # Set secure permissions
+    chmod 644 "$LAUNCH_AGENT_FILE"
+    
     # Unload if already loaded
     launchctl unload "$LAUNCH_AGENT_FILE" 2>/dev/null || true
     
     # Load the new configuration
-    launchctl load "$LAUNCH_AGENT_FILE"
+    if ! launchctl load "$LAUNCH_AGENT_FILE"; then
+        log_message "Failed to load LaunchAgent" "$CONFIG_DIR/error.log"
+        return 1
+    fi
     
     # Start the process immediately
-    launchctl start com.macosloginwatcher
+    if ! launchctl start com.macosloginwatcher; then
+        log_message "Failed to start process" "$CONFIG_DIR/error.log"
+        return 1
+    fi
     
     log_message "LaunchAgent setup completed and started" "$CONFIG_DIR/output.log"
+    return 0
 }
 
 # Function to remove autostart
 remove_autostart() {
     if [ -f "$LAUNCH_AGENT_FILE" ]; then
-        launchctl unload "$LAUNCH_AGENT_FILE"
-        rm "$LAUNCH_AGENT_FILE"
+        # Unload the service first
+        launchctl unload "$LAUNCH_AGENT_FILE" 2>/dev/null || true
+        
+        # Wait a bit to ensure the service is unloaded
+        sleep 2
+        
+        # Remove the file
+        rm -f "$LAUNCH_AGENT_FILE"
+        
+        # Verify removal
+        if [ -f "$LAUNCH_AGENT_FILE" ]; then
+            log_message "Failed to remove LaunchAgent file" "$CONFIG_DIR/error.log"
+            return 1
+        fi
     fi
+    return 0
 }
 
 # Функция для проверки sudo прав
@@ -218,35 +276,77 @@ validate_config() {
     return 0
 }
 
-# Function to check if process is already running
-check_running_process() {
-    local process_id="$1"
-    # Проверяем, есть ли другой процесс с таким же ID
-    if pgrep -f "$process_id" | grep -v "$$" > /dev/null; then
-        log_message "Another instance is already running with process ID: $process_id" "$CONFIG_DIR/error.log"
-        return 1
-    fi
-    return 0
-}
-
-# Function to cleanup on exit
-cleanup() {
+# Function to handle process termination
+handle_termination() {
+    local pid
     if [ -f "$PID_FILE" ]; then
-        local pid=$(cat "$PID_FILE" 2>/dev/null)
+        pid=$(cat "$PID_FILE" 2>/dev/null)
         if [ "$pid" = "$$" ]; then
             rm -f "$PID_FILE"
         fi
     fi
+    # Kill any child processes
+    pkill -P $$ 2>/dev/null || true
+    exit 0
 }
 
-# Register cleanup function
-trap cleanup EXIT
+# Function to check if process is already running
+check_running_process() {
+    local process_id="$1"
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE" 2>/dev/null)
+        if [ -n "$pid" ] && ps -p "$pid" > /dev/null 2>&1; then
+            log_message "Process already running with PID: $pid" "$CONFIG_DIR/error.log"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Register termination handler
+trap handle_termination SIGTERM SIGINT
 
 # Add this check before other if statements
 if [ "$1" = "--version" ]; then
     echo "macosloginwatcher version $VERSION"
     exit 0
 fi
+
+# Function to send Telegram message with error handling
+send_telegram_message() {
+    local message="$1"
+    local response
+    response=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+        -d "chat_id=$CHAT_ID" \
+        -d "text=$message" \
+        -d "parse_mode=HTML" 2>&1)
+    
+    if [ $? -ne 0 ]; then
+        log_message "Failed to send Telegram message: $response" "$CONFIG_DIR/error.log"
+        return 1
+    fi
+    return 0
+}
+
+# Function to get current user with error handling
+get_current_user() {
+    local user
+    user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}' 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$user" ]; then
+        log_message "Failed to get current user" "$CONFIG_DIR/error.log"
+        return 1
+    fi
+    echo "$user"
+    return 0
+}
+
+# Function to set secure permissions
+set_secure_permissions() {
+    chmod 700 "$CONFIG_DIR" 2>/dev/null || true
+    chmod 600 "$CONFIG_FILE" 2>/dev/null || true
+    chmod 600 "$PRIVILEGES_FILE" 2>/dev/null || true
+    chmod 600 "$PID_FILE" 2>/dev/null || true
+}
 
 # Main script logic
 if [ "$1" = "--process-id" ]; then
@@ -257,52 +357,71 @@ if [ "$1" = "--process-id" ]; then
         exit 1
     fi
     
+    # Check if process is already running
+    if ! check_running_process "$PROCESS_IDENTIFIER"; then
+        exit 1
+    fi
+    
+    # Save PID
+    echo "$$" > "$PID_FILE"
+    
     # Load configuration
     if ! load_config; then
         log_message "Error: Configuration not found. Please run 'macosloginwatcher --setup' first" "$CONFIG_DIR/error.log"
+        rm -f "$PID_FILE"
         exit 1
     fi
     
     # Validate configuration
     if ! validate_config; then
         log_message "Error: Invalid configuration" "$CONFIG_DIR/error.log"
+        rm -f "$PID_FILE"
         exit 1
     fi
     
     # Create config directory if it doesn't exist
     create_config_dir
     
+    # Set secure permissions
+    set_secure_permissions
+    
     # Check and rotate logs
     check_and_rotate_logs
     
     # Send startup notification
     timestamp=$(get_timestamp)
-    user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
+    user=$(get_current_user) || {
+        rm -f "$PID_FILE"
+        exit 1
+    }
     startup_message="🚀 MacOSLoginWatcher started by $user at $timestamp"
     
     # Send to Telegram
-    curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-        -d "chat_id=$CHAT_ID" \
-        -d "text=$startup_message" \
-        -d "parse_mode=HTML" > /dev/null
+    if ! send_telegram_message "$startup_message"; then
+        log_message "Failed to send startup notification" "$CONFIG_DIR/error.log"
+        rm -f "$PID_FILE"
+        exit 1
+    fi
     
     # Start monitoring login events
-    log stream --style syslog --predicate 'eventMessage CONTAINS "CA sending unlock success to dispatch"' | while read -r line; do
+    log stream --style syslog --predicate 'eventMessage CONTAINS "CA sending unlock success to dispatch"' 2>> "$CONFIG_DIR/error.log" | while read -r line; do
         if [[ "$line" != *"com.apple.loginwindow.logging:Standard"* ]]; then
             continue
         fi
 
         # Extract date (1st and 2nd fields)
         timestamp=$(get_timestamp)
-        user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
+        user=$(get_current_user) || continue
         message="🔓 Mac unlocked by $user at $timestamp"
 
         # Send to Telegram
-        curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-            -d "chat_id=$CHAT_ID" \
-            -d "text=$message" \
-            -d "parse_mode=HTML" > /dev/null
+        if ! send_telegram_message "$message"; then
+            log_message "Failed to send unlock notification" "$CONFIG_DIR/error.log"
+        fi
     done
+    
+    # Cleanup on exit
+    rm -f "$PID_FILE"
     exit 0
 fi
 
@@ -318,10 +437,17 @@ if [ "$1" = "--setup" ]; then
         exit 1
     fi
     
+    # Create config directory if it doesn't exist
+    create_config_dir
+    
     # Check if config exists
     if [ -f "$CONFIG_FILE" ]; then
         # Load existing config
-        source "$CONFIG_FILE"
+        if ! load_config; then
+            echo "Error: Failed to load existing configuration"
+            exit 1
+        fi
+        
         echo "Current configuration found:"
         echo "BOT_TOKEN: ${BOT_TOKEN:0:4}...${BOT_TOKEN: -4}"
         echo "CHAT_ID: $CHAT_ID"
@@ -365,10 +491,16 @@ if [ "$1" = "--setup" ]; then
         echo "Configuration saved successfully!"
     fi
     
+    # Set secure permissions
+    set_secure_permissions
+    
     # Ask about autostart
     read -p "Do you want to enable autostart on system login? (yes/no): " AUTOSTART
     if [[ "$AUTOSTART" =~ ^[Yy][Ee][Ss]$ ]]; then
-        setup_autostart
+        if ! setup_autostart; then
+            echo "Error: Failed to setup autostart"
+            exit 1
+        fi
         echo "Autostart has been enabled and process started!"
     fi
     
@@ -379,6 +511,15 @@ if [ "$1" = "--disable" ]; then
     # First show and kill running processes
     echo "Found running macosloginwatcher processes:"
     ps aux | grep macosloginwatcher | grep -v grep || echo "No running processes found"
+    
+    # Kill processes and remove PID file
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE" 2>/dev/null)
+        if [ -n "$pid" ]; then
+            kill "$pid" 2>/dev/null || true
+        fi
+        rm -f "$PID_FILE"
+    fi
     pkill -f "macosloginwatcher" || true
     
     # Then remove autostart and privileges file
