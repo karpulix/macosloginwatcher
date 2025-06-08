@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Version
-VERSION="1.1.1"
+VERSION="1.1.2"
 
 # Get script path
 if [[ -L "$0" ]]; then
@@ -281,7 +281,7 @@ main() {
             # Check for root privileges
             if [ "$(id -u)" != "0" ]; then
                 echo "Error: This script must be run as root for setup"
-                echo "Please run: sudo $0 --setup"
+                echo "Please run: sudo macosloginwatcher --setup (or maybe: sudo $0 --setup)"
                 exit 1
             fi
             
@@ -316,13 +316,15 @@ main() {
             
             save_config "$BOT_TOKEN" "$CHAT_ID"
             echo "Configuration saved successfully!"
+            echo "Use --start to start the service"
+            echo "Use --stop to stop the service"
 
             ;;
             
         --start)
             if [ "$(id -u)" != "0" ]; then
                 echo "Error: This script must be run as root"
-                echo "Please run: sudo $0 --start"
+                echo "Please run: sudo macosloginwatcher --start (or maybe: sudo $0 --start)"
                 exit 1
             fi
             if ! setup_launch_agent; then
@@ -335,7 +337,7 @@ main() {
         --stop)
             if [ "$(id -u)" != "0" ]; then
                 echo "Error: This script must be run as root"
-                echo "Please run: sudo $0 --stop"
+                echo "Please run: sudo macosloginwatcher --stop (or maybe: sudo $0 --stop)"
                 exit 1
             fi
             remove_launch_agent
