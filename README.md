@@ -1,148 +1,134 @@
 # MacOSLoginWatcher
 
-A macOS utility that monitors system login events and sends notifications to Telegram when your Mac is unlocked.
+A macOS daemon that monitors system login events and sends notifications to Telegram when the system is unlocked.
 
 ## Features
 
-- Monitors system login events in real-time
-- Sends notifications to Telegram when your Mac is unlocked
-- Supports autostart on system login
-- Easy setup and configuration
-- Secure storage of Telegram credentials
+- 🔔 Sends Telegram notifications when your Mac is unlocked
+- 🚀 Sends startup notification when the service starts
+- 🔄 Automatically retries sending messages if internet is not available
+- 📝 Maintains detailed logs of all events
+- 🔒 Secure configuration storage
+- ⚡ Runs as a system daemon
+- 🛠️ Easy installation and setup
 
 ## Installation
 
-### Option 1: Direct Installation
+### Using Homebrew
 
-1. Download the script:
 ```bash
-curl -O https://raw.githubusercontent.com/karpulix/macosloginwatcher/main/macosloginwatcher.sh
-```
 
-2. Make it executable:
-```bash
-chmod +x macosloginwatcher.sh
-```
-
-3. Move it to a directory in your PATH (optional):
-```bash
-sudo mv macosloginwatcher.sh /usr/local/bin/macosloginwatcher
-```
-
-### Option 2: Homebrew Installation
-
-1. Add the tap:
-```bash
 brew tap karpulix/homebrew-tools
+brew install karpulix/homebrew-tools/macosloginwatcher
+
 ```
 
-2. Install the formula:
-```bash
-brew install karpulix/homebrew-tools/macosloginwatcher
-```
+### Manual Installation
+
+1. Download the latest release from the [releases page](https://github.com/karpulix/macosloginwatcher/releases)
+2. Make the script executable:
+   ```bash
+   chmod +x macosloginwatcher.sh
+   ```
+3. Move it to a directory in your PATH:
+   ```bash
+   sudo mv macosloginwatcher.sh /usr/local/bin/macosloginwatcher
+   ```
 
 ## Setup
 
-1. Create a Telegram Bot:
-   - Open Telegram and search for "@BotFather"
-   - Send `/newbot` command
-   - Follow the instructions to create a new bot
-   - Save the bot token provided by BotFather
-
-2. Get your Telegram Chat ID:
-   - Open Telegram and search for "@userinfobot"
-   - Send any message to the bot
-   - The bot will reply with your chat ID
-
+1. Create a Telegram bot using [@BotFather](https://t.me/BotFather) and get the bot token
+2. Get your Telegram chat ID (you can use [@userinfobot](https://t.me/userinfobot))
 3. Run the setup wizard:
-```bash
-macosloginwatcher --setup
-```
-
-4. Follow the prompts to:
-   - Enter your Telegram Bot Token
-   - Enter your Telegram Chat ID
-   - Choose whether to enable autostart on system login
-   - Choose whether to start the process immediately
+   ```bash
+   sudo macosloginwatcher --setup
+   ```
+4. Follow the prompts to enter your bot token and chat ID
 
 ## Usage
 
-### Start Monitoring
-
-The script will automatically start monitoring after setup if you chose to start it immediately. Otherwise, you can start it manually:
+### Start the Service
 
 ```bash
-macosloginwatcher
+sudo macosloginwatcher --start
 ```
 
-### Disable Monitoring
-
-To stop monitoring and disable autostart:
+### Stop the Service
 
 ```bash
-macosloginwatcher --disable
+sudo macosloginwatcher --stop
 ```
 
-### Reconfigure
-
-To change your Telegram settings or autostart preferences:
+### Check Version
 
 ```bash
-macosloginwatcher --setup
+macosloginwatcher --version
 ```
 
-## How It Works
+## Configuration
 
-1. The script monitors system logs for unlock events
-2. When your Mac is unlocked, it sends a notification to your Telegram
-3. The notification includes:
-   - Timestamp of the unlock
-   - Username of the person who unlocked the Mac
+The configuration is stored in `~/.config/macosloginwatcher/config` (you need root privileges for access) with the following format:
+```
+BOT_TOKEN=your_bot_token
+CHAT_ID=your_chat_id
+```
 
-## Requirements
+## Logs
 
-- macOS 10.12 or later
-- Telegram account
-- sudo privileges (for log monitoring)
-  - You will be prompted for your password when the script first runs
-  - This is required to monitor system logs for unlock events
+Logs are stored in `~/.config/macosloginwatcher/`:
+- `output.log` - Contains successful operations
+- `error.log` - Contains error messages
+
+Logs are automatically rotated when they reach 5MB in size, with a maximum of 5 log files.
+
+## Features in Detail
+
+### Telegram Notifications
+
+- 🔓 Unlock notifications: Sent when your Mac is unlocked
+- 🚀 Startup notifications: Sent when the service starts
+- 🔄 Automatic retry: If internet is not available, the service will retry sending messages up to 30 times with 10-second intervals
+
+### Security
+
+- Configuration files are stored with restricted permissions (600)
+- The daemon runs as root to ensure proper system access
+- All sensitive information is stored in the user's home directory
+
+### Logging
+
+- Detailed timestamps for all events
+- Automatic log rotation
+- Separate logs for successful operations and errors
+- Maximum log size: 5MB
+- Maximum number of log files: 5
 
 ## Troubleshooting
 
-### Common Issues
+If you're having issues:
 
-1. **Script not found after installation**
-   - Make sure the script is in your PATH
-   - Try using the full path to the script
+1. Check the logs:
+   ```bash
+   sudo cat ~/.config/macosloginwatcher/error.log
+   sudo cat ~/.config/macosloginwatcher/output.log
+   ```
 
-2. **No notifications received**
-   - Verify your Telegram Bot Token and Chat ID
-   - Check if the bot is started in Telegram
-   - Ensure you have an active internet connection
+2. Verify the service is running:
+   ```bash
+   ps aux | grep macosloginwatcher | grep -v grep
+   ```
+   Note: You should see two processes - the main daemon and a child process for message handling.
 
-3. **Permission denied or sudo password prompt**
-   - The script requires sudo access to monitor system logs
-   - You will be prompted for your password when the script first runs
-   - If you see "Error: This script requires sudo privileges", enter your password when prompted
-   - If you want to avoid password prompts, you can add the following line to your sudoers file (use `visudo`):
-     ```
-     yourusername ALL=(ALL) NOPASSWD: /usr/bin/log stream
-     ```
-
-4. **Script stops after some time**
-   - This might happen if the sudo session expires
-   - Consider adding the NOPASSWD rule to sudoers as mentioned above
-
-## Security
-
-- Your Telegram Bot Token and Chat ID are stored in `~/.config/macosloginwatcher/config`
-- The script requires sudo privileges only for log monitoring
-- No data is sent to any servers other than Telegram
+3. Check the LaunchDaemon status:
+   ```bash
+   sudo launchctl list | grep macosloginwatcher
+   ```
+   Note: Status 0 is normal - it means the daemon successfully started and spawned its child process.
 
 ## Contributing
 
-Feel free to submit issues and enhancement requests!
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
