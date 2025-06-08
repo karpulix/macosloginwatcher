@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Version
-VERSION="1.1.3"
+VERSION="1.1.4"
 
 # Get script path
 if [[ -L "$0" ]]; then
