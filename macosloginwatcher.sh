@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+VERSION="1.0.33"
+
 APP_NAME="macosloginwatcher"
 CONFIG_DIR="$HOME/.config/$APP_NAME"
 CONFIG_FILE="$CONFIG_DIR/config"
