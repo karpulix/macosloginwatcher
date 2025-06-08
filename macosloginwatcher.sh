@@ -5,7 +5,7 @@ set -o pipefail
 trap 'echo "Error on line $LINENO"' ERR
 
 # Add at the beginning after other variables
-VERSION="1.0.29"
+VERSION="1.0.30"
 
 CONFIG_DIR="$HOME/.config/macosloginwatcher"
 CONFIG_FILE="$CONFIG_DIR/config"
@@ -257,14 +257,52 @@ if [ "$1" = "--process-id" ]; then
         exit 1
     fi
     
-    # Check if another instance is running
-    if pgrep -f "macosloginwatcher.*$PROCESS_IDENTIFIER" | grep -v "$$" > /dev/null; then
-        echo "Another instance is already running"
+    # Load configuration
+    if ! load_config; then
+        log_message "Error: Configuration not found. Please run 'macosloginwatcher --setup' first" "$CONFIG_DIR/error.log"
         exit 1
     fi
     
-    # Start monitoring
-    monitor_login_activity
+    # Validate configuration
+    if ! validate_config; then
+        log_message "Error: Invalid configuration" "$CONFIG_DIR/error.log"
+        exit 1
+    fi
+    
+    # Create config directory if it doesn't exist
+    create_config_dir
+    
+    # Check and rotate logs
+    check_and_rotate_logs
+    
+    # Send startup notification
+    timestamp=$(get_timestamp)
+    user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
+    startup_message="🚀 MacOSLoginWatcher started by $user at $timestamp"
+    
+    # Send to Telegram
+    curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+        -d "chat_id=$CHAT_ID" \
+        -d "text=$startup_message" \
+        -d "parse_mode=HTML" > /dev/null
+    
+    # Start monitoring login events
+    log stream --style syslog --predicate 'eventMessage CONTAINS "CA sending unlock success to dispatch"' | while read -r line; do
+        if [[ "$line" != *"com.apple.loginwindow.logging:Standard"* ]]; then
+            continue
+        fi
+
+        # Extract date (1st and 2nd fields)
+        timestamp=$(get_timestamp)
+        user=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ {print $3}')
+        message="🔓 Mac unlocked by $user at $timestamp"
+
+        # Send to Telegram
+        curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+            -d "chat_id=$CHAT_ID" \
+            -d "text=$message" \
+            -d "parse_mode=HTML" > /dev/null
+    done
     exit 0
 fi
 
